@@ -10,6 +10,8 @@ from selenium.webdriver.common.by import By
 import json
 import requests
 from seleniumbase import Driver
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 from pathlib import Path
 from bs4 import BeautifulSoup
 
@@ -78,35 +80,53 @@ def is_date_exceed_half_year(scraped_items:pd.DataFrame, days_limit:int):
     return False
 
 def get_valid_headers_cookies(username: str):
-    # 1. Get the main script directory (not the utils directory)
-    main_dir = Path(__file__).resolve().parent.parent  # one level above utils
-    json_dir = main_dir / "auth_data" # directory to store headers/cookies
-    json_dir.mkdir(exist_ok=True)  # create directory if it doesn't exist
-    json_path = json_dir / f"instagram_posts_scraper_headers.json" # path to the JSON file
+    # Define the URL for the user's profile
     url = f"https://www.pixnoy.com/profile/{username}"
 
-    # 2. Use Selenium to bypass Cloudflare and save headers/cookies
-    def crawl_and_save():
-        print("⚠️ Launching Selenium to bypass Cloudflare...")
-        driver = Driver(uc=True, headless=True)
-        driver.uc_open_with_reconnect(url)
-        time.sleep(10)
-        driver.find_element(By.XPATH, '//*[@id="button"]/span').click()
-        time.sleep(10)
+    # Define the path where headers and cookies will be stored
+    main_dir = Path(__file__).resolve().parent.parent
+    json_dir = main_dir / "auth_data"
+    json_dir.mkdir(exist_ok=True)
+    json_path = json_dir / "instagram_posts_scraper_headers.json"
 
+    # Launch browser and extract headers and cookies
+    def crawl_and_save():
+        print("Launching browser to bypass Cloudflare")
+        driver = Driver(uc=True, headless=True, chromium_arg="--mute-audio")
+        driver.uc_open_with_reconnect(url)
+
+        # Attempt to click the "watch ad" button if it appears
+        try:
+            watch_ad_btn = WebDriverWait(driver, 15).until(
+                EC.element_to_be_clickable((By.CLASS_NAME, "fc-rewarded-ad-button"))
+            )
+            watch_ad_btn.click()
+            print("Clicked to watch ad")
+        except Exception as e:
+            print("Ad button not found", e)
+
+        time.sleep(10)
+        print("Searching for iframes to skip ad")
+        try_skip_ads(driver)
+
+        time.sleep(3)
+        driver.find_element(By.XPATH, '//*[@id="button"]/span').click()
+        time.sleep(5)
+
+        # Extract cookies and user-agent
         cookies = {c['name']: c['value'] for c in driver.get_cookies()}
         user_agent = driver.execute_script("return navigator.userAgent;")
         headers = {"User-Agent": user_agent}
 
-        # save json
+        # Save headers and cookies to file
         with open(json_path, "w") as f:
             json.dump({"headers": headers, "cookies": cookies}, f, indent=2)
 
         driver.quit()
-        print("Already update headers and cookies")
+        print("Headers and cookies updated successfully")
         return headers, cookies
 
-    # 2. check json 是否存在
+    # Check if cache file exists
     if json_path.exists():
         with open(json_path, "r") as f:
             try:
@@ -114,20 +134,56 @@ def get_valid_headers_cookies(username: str):
                 headers = data["headers"]
                 cookies = data["cookies"]
 
-                print("Attempting to use cached headers and cookies...")
+                print("Attempting to use cached headers and cookies")
                 resp = requests.get(url, headers=headers, cookies=cookies)
                 if resp.status_code == 200:
-                    print("Cache is valid. Using cached data.")
+                    print("Cache is valid")
                     return headers, cookies
                 else:
-                    print(f"Cache is invalid. Status code: {resp.status_code}. Fetching new data...")
+                    print(f"Cache invalid. Status code: {resp.status_code}. Getting new data")
                     return crawl_and_save()
 
             except Exception as e:
-                print("Failed to read JSON file. Re-fetching headers and cookies.")
+                print("Failed to read cache file. Getting new data")
                 return crawl_and_save()
     else:
         return crawl_and_save()
+
+
+# Try to skip ads by clicking "skip" or "close" buttons inside iframes
+def try_skip_ads(driver):
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    found = False
+
+    for i, iframe in enumerate(iframes):
+        driver.switch_to.default_content()
+        driver.switch_to.frame(iframe)
+
+        try:
+            skip_button = driver.find_element(By.XPATH, '//button[@aria-label="略過廣告"]')
+            print(f"Found skip button in iframe {i}")
+            driver.execute_script("arguments[0].click();", skip_button)
+            found = True
+        except:
+            pass
+
+        if found:
+            break
+
+        try:
+            close_button = driver.find_element(By.XPATH, '//button[@aria-label="Close ad"]')
+            print(f"Found close button in iframe {i}")
+            driver.execute_script("arguments[0].click();", close_button)
+            found = True
+        except:
+            pass
+
+        if found:
+            break
+
+    driver.switch_to.default_content()
+    if not found:
+        print("No skip or close buttons found in any iframe")
 
 def get_scraper_utils(html:str):
     soup = BeautifulSoup(html, 'html.parser')
