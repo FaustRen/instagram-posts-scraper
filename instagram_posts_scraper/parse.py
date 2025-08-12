@@ -61,8 +61,8 @@ class Parser(object):
             post = {}
             
             # 1. Post content text
-            sum_div = item.select_one("div.sum")
-            post["text"] = sum_div.text.strip() if sum_div else None
+            img_tag = item.select_one("img")
+            post["text"] = img_tag.get("alt") if img_tag else None
 
             # 2. Like count
             like_span = item.select_one("span.count_item_like span.num")
