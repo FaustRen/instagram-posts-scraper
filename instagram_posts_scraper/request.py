@@ -27,9 +27,9 @@ class PixwoxRequest(object):
         self.__valid_headers_cookies = valid_headers_cookies
         self.__user_agent = self.__valid_headers_cookies[0].get("User-Agent")
         self.__cookies = self.__valid_headers_cookies[1]
-
+        
     def get_init_content(self, username: str) -> str:
-        get_url = f"https://www.picnob.com/zh-hant/profile/{username}"
+        get_url = f"https://www.pixnoy.com/profile/{username}"
         res = self.send_requests(get_url)
         soup = BeautifulSoup(res.text, self.__DEFAULT_SOUP_PARSER)
         userid_input_element = soup.find(

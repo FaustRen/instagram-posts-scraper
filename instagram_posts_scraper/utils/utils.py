@@ -80,45 +80,55 @@ def is_date_exceed_half_year(scraped_items:pd.DataFrame, days_limit:int):
     return False
 
 def get_valid_headers_cookies(username: str):
-    # Define the URL for the user's profile
     url = f"https://www.pixnoy.com/profile/{username}"
 
-    # Define the path where headers and cookies will be stored
     main_dir = Path(__file__).resolve().parent.parent
     json_dir = main_dir / "auth_data"
     json_dir.mkdir(exist_ok=True)
     json_path = json_dir / "instagram_posts_scraper_headers.json"
 
-    # Launch browser and extract headers and cookies
     def crawl_and_save():
         print("Launching browser to bypass Cloudflare")
         driver = Driver(uc=True, headless=True, chromium_arg="--mute-audio")
         driver.uc_open_with_reconnect(url)
 
-        # Attempt to click the "watch ad" button if it appears
+        # Wait for page to load
         try:
-            watch_ad_btn = WebDriverWait(driver, 15).until(
-                EC.element_to_be_clickable((By.CLASS_NAME, "fc-rewarded-ad-button"))
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='userid']"))
             )
-            watch_ad_btn.click()
-            print("Clicked to watch ad")
+            print("Page loaded successfully")
         except Exception as e:
-            print("Ad button not found", e)
+            print(f"Page load wait timed out: {e}, continuing anyway")
 
-        time.sleep(10)
-        print("Searching for iframes to skip ad")
-        try_skip_ads(driver)
+        # Try to dismiss any overlay ads (non-blocking)
+        try:
+            time.sleep(3)
+            print("Searching for iframes to skip ad")
+            try_skip_ads(driver)
+        except Exception as e:
+            print(f"Ad skip attempt failed (non-critical): {e}")
+
+        # Try clicking any visible close/dismiss buttons on main page
+        for selector in [
+            '.demand-supply__sd-close-button',
+            '[aria-label="Close"]',
+            '[aria-label="關閉"]',
+        ]:
+            try:
+                btn = driver.find_element(By.CSS_SELECTOR, selector)
+                driver.execute_script("arguments[0].click();", btn)
+                print(f"Clicked close button: {selector}")
+                time.sleep(1)
+            except:
+                pass
 
         time.sleep(3)
-        driver.find_element(By.XPATH, '//*[@id="button"]/span').click()
-        time.sleep(5)
 
-        # Extract cookies and user-agent
         cookies = {c['name']: c['value'] for c in driver.get_cookies()}
         user_agent = driver.execute_script("return navigator.userAgent;")
         headers = {"User-Agent": user_agent}
 
-        # Save headers and cookies to file
         with open(json_path, "w") as f:
             json.dump({"headers": headers, "cookies": cookies}, f, indent=2)
 
@@ -126,7 +136,6 @@ def get_valid_headers_cookies(username: str):
         print("Headers and cookies updated successfully")
         return headers, cookies
 
-    # Check if cache file exists
     if json_path.exists():
         with open(json_path, "r") as f:
             try:
@@ -142,44 +151,43 @@ def get_valid_headers_cookies(username: str):
                 else:
                     print(f"Cache invalid. Status code: {resp.status_code}. Getting new data")
                     return crawl_and_save()
-
             except Exception as e:
                 print("Failed to read cache file. Getting new data")
                 return crawl_and_save()
     else:
         return crawl_and_save()
-
-
-# Try to skip ads by clicking "skip" or "close" buttons inside iframes
 def try_skip_ads(driver):
     iframes = driver.find_elements(By.TAG_NAME, "iframe")
     found = False
 
+    skip_xpaths = [
+        '//button[@aria-label="略過廣告"]',
+        '//button[@aria-label="Close ad"]',
+        '//button[@aria-label="Close"]',
+        '//button[contains(@class,"skip")]',
+        '//button[contains(@class,"close")]',
+        '//button[contains(text(),"Skip")]',
+    ]
+
     for i, iframe in enumerate(iframes):
-        driver.switch_to.default_content()
-        driver.switch_to.frame(iframe)
-
         try:
-            skip_button = driver.find_element(By.XPATH, '//button[@aria-label="略過廣告"]')
-            print(f"Found skip button in iframe {i}")
-            driver.execute_script("arguments[0].click();", skip_button)
-            found = True
+            driver.switch_to.default_content()
+            driver.switch_to.frame(iframe)
+
+            for xpath in skip_xpaths:
+                try:
+                    btn = driver.find_element(By.XPATH, xpath)
+                    driver.execute_script("arguments[0].click();", btn)
+                    print(f"Found and clicked button '{xpath}' in iframe {i}")
+                    found = True
+                    break
+                except:
+                    pass
+
+            if found:
+                break
         except:
-            pass
-
-        if found:
-            break
-
-        try:
-            close_button = driver.find_element(By.XPATH, '//button[@aria-label="Close ad"]')
-            print(f"Found close button in iframe {i}")
-            driver.execute_script("arguments[0].click();", close_button)
-            found = True
-        except:
-            pass
-
-        if found:
-            break
+            continue
 
     driver.switch_to.default_content()
     if not found:
