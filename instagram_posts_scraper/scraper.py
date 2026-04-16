@@ -18,15 +18,15 @@ class Scraper(object):
 
     @property
     def init_url(self) -> str:
-        self._init_url = f"https://www.picnob.com/zh-hant/profile/{self.username}"
+        self._init_url = f"https://www.pixnoy.com/profile/{self.username}"
         return self._init_url
     
     def get_init_api(self, userid:str) -> str:
-        self._init_api = f"https://www.piokok.com/api/posts?userid={userid}"
+        self._init_api = f"https://www.pixnoy.com/api/posts?userid={userid}"
         return self._init_api
     
     def get_next_api(self, userid:str, next_maxid:str, next_:str, username:str) -> str:
-        next_api = f"https://www.piokok.com/api/posts?username={username}&userid={userid}&next={next_}&maxid={next_maxid}"
+        next_api = f"https://www.pixnoy.com/api/posts?username={username}&userid={userid}&next={next_}&maxid={next_maxid}"
         return next_api
     
     def send_api(self,api_url:str):
