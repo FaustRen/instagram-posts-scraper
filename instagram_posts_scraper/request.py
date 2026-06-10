@@ -1,21 +1,52 @@
 # -*- coding: utf-8 -*-
 import json
+import time
 import cloudscraper
 from bs4 import BeautifulSoup
 import requests
 
 
+class _SeleniumResponse:
+    """Minimal requests.Response-compatible wrapper for Selenium page fetches."""
+    def __init__(self, text: str):
+        self._text = text
+        self.status_code = 200
+
+    @property
+    def text(self):
+        return self._text
+
+    @property
+    def content(self):
+        return self._text.encode("utf-8")
+
+    def json(self, **kwargs):
+        return json.loads(self._text)
+
+
 class PixwoxRequest(object):
     def __init__(self):
         self.__DEFAULT_SOUP_PARSER = "lxml"
+        self.__driver = None
         self.__scraper = cloudscraper.create_scraper(
             delay=10,
             browser={"custom": "ScraperBot/1.0",
                      "platform": "windows",
                      "mobile": "False"})
 
+    def set_driver(self, driver):
+        """Use a live Selenium driver for all requests (bypasses Cloudflare)."""
+        self.__driver = driver
+
     def send_requests(self, url):
-        # response = self.__scraper.get(url) # temporary stop this good method  :（
+        if self.__driver is not None:
+            self.__driver.get(url)
+            time.sleep(2)
+            # For JSON API endpoints Chrome wraps content in <pre>; for HTML pages
+            # we want the full source. Use innerText of body to get clean content.
+            text = self.__driver.execute_script("return document.body.innerText")
+            return _SeleniumResponse(text)
+        # Fallback: plain requests (works only when Cloudflare is not blocking)
         response = requests.get(
             url=url, 
             headers={"User-Agent":self.__user_agent}, 
