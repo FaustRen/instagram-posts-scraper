@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from types import SimpleNamespace
 from instagram_posts_scraper.request import *
 from instagram_posts_scraper.parse import *
 from instagram_posts_scraper.utils import *
@@ -24,8 +25,11 @@ class InstaPeriodScraper(object):
             api_parser=self.api_parser
         )
 
-    def check_account_is_public(self):
-        self.init_response = self.pixwox_request.send_requests(url=self.scraper.init_url)
+    def check_account_is_public(self, init_html=None):
+        if init_html is not None:
+            self.init_response = SimpleNamespace(text=init_html)
+        else:
+            self.init_response = self.pixwox_request.send_requests(url=self.scraper.init_url)
         self.profile_soup = self.parser.get_soup(response=self.init_response)
         self.userid = self.parser.get_userid(profile_soup=self.profile_soup)
         self.account_status = get_account_status(userid=self.userid, profile_soup=self.profile_soup)
@@ -227,59 +231,69 @@ class InstaPeriodScraper(object):
         username = self.target_info["username"]
         self.scraper.set_username(username)
         days_limit = target_info["days_limit"]
-        
+
         # check if user-agent & cookies are valid first
         print("# check if user-agent & cookies are valid first")
-        valid_headers_cookies = get_valid_headers_cookies(username=username)
-        self.pixwox_request.set_valid_headers_cookies(valid_headers_cookies=valid_headers_cookies)
-    
-        if not self.check_account_is_public():
-            print("This is private account")
-            if self.account_status == "private":
-                self.get_profile()
-                res = self.get_private_account_res()
-                return res
-            elif self.account_status == "missing":
-                res = self.get_missing_account_res()
-                return res
-        
-        if self.check_account_is_public():
-            self.scraper_utils = get_scraper_utils(html=self.init_response.text) # new
-            print(f"This is public account")
-            # get_scraper_utils
-            init_response = self.pixwox_request.send_requests(url=self.scraper.init_url)
-            
-            
-            # init_api_data = self.get_init_api_data() # 帳號資訊 & 上方頁面內容
-            userid = self.scraper_utils["userid"]
-            username = self.scraper_utils["username"]
-            next_maxid = self.scraper_utils["data_maxid"]
-            next_ = self.scraper_utils["clean_data_next"]
-            next_api = f"https://www.piokok.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
-            init_api_data = self.pixwox_request.send_requests(url=next_api) # actually, this is next..
-            init_api_data = init_api_data.json()
-            self.get_profile()
-            # can scrape next round's posts
-            if init_api_data["posts"]["has_next"] != False:
-                maxid = init_api_data["posts"]["maxid"]
-                period_posts = self.get_period_data(
-                    init_maxid=maxid,
-                    days_limit=days_limit,
-                    init_api_data=init_api_data,
-                    username=username
-                    )
+        headers, cookies, init_html, driver = get_valid_headers_cookies(username=username)
+        self.pixwox_request.set_valid_headers_cookies(valid_headers_cookies=(headers, cookies))
+        # Wire the live Selenium driver so all API requests bypass Cloudflare.
+        # driver is None only when the requests-based cache path succeeded.
+        if driver is not None:
+            self.pixwox_request.set_driver(driver)
 
-                # return period_posts
-                res = self.get_public_account_res(
-                    scraped_posts=period_posts, 
-                    init_api_data=init_api_data
-                    )
-                init_posts = self.parser.extract_init_posts(init_response.text)
-                res["init_posts"] = init_posts
-                return res
-            # # no more posts
-            elif init_api_data["posts"]["has_next"] == False: # (表示該帳號貼文數<=12, 無法繼續往下找)
-                res = self.get_public_account_res(scraped_posts=init_api_data["posts"]["items"], init_api_data=init_api_data)
-                init_posts = self.parser.extract_init_posts(init_response.text)
-                res["init_posts"] = init_posts
-                return res
+        try:
+            if not self.check_account_is_public(init_html=init_html):
+                print("This is private account")
+                if self.account_status == "private":
+                    self.get_profile()
+                    res = self.get_private_account_res()
+                    return res
+                elif self.account_status == "missing":
+                    res = self.get_missing_account_res()
+                    return res
+
+            if self.check_account_is_public(init_html=init_html):
+                self.scraper_utils = get_scraper_utils(html=self.init_response.text) # new
+                print(f"This is public account")
+                init_response = self.init_response
+
+                # init_api_data = self.get_init_api_data() # 帳號資訊 & 上方頁面內容
+                userid = self.scraper_utils["userid"]
+                username = self.scraper_utils["username"]
+                next_maxid = self.scraper_utils["data_maxid"]
+                next_ = self.scraper_utils["clean_data_next"]
+                next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
+                init_api_data = self.pixwox_request.send_requests(url=next_api) # actually, this is next..
+                init_api_data = init_api_data.json()
+                self.get_profile()
+                # can scrape next round's posts
+                if init_api_data["posts"]["has_next"] != False:
+                    maxid = init_api_data["posts"]["maxid"]
+                    period_posts = self.get_period_data(
+                        init_maxid=maxid,
+                        days_limit=days_limit,
+                        init_api_data=init_api_data,
+                        username=username
+                        )
+
+                    # return period_posts
+                    res = self.get_public_account_res(
+                        scraped_posts=period_posts, 
+                        init_api_data=init_api_data
+                        )
+                    init_posts = self.parser.extract_init_posts(init_response.text)
+                    res["init_posts"] = init_posts
+                    return res
+                # # no more posts
+                elif init_api_data["posts"]["has_next"] == False: # (表示該帳號貼文數<=12, 無法繼續往下找)
+                    res = self.get_public_account_res(scraped_posts=init_api_data["posts"]["items"], init_api_data=init_api_data)
+                    init_posts = self.parser.extract_init_posts(init_response.text)
+                    res["init_posts"] = init_posts
+                    return res
+        finally:
+            # Always close the Selenium driver when scraping is done or an error occurs.
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
