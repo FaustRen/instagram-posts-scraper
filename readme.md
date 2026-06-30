@@ -46,7 +46,7 @@ from instagram_posts_scraper.instagram_posts_scraper import InstaPeriodScraper
 from IPython.display import display
 
 ig_posts_scraper = InstaPeriodScraper()
-target_info = {"username": "stephencurry30", "days_limit": 5}
+target_info = {"username": "stephencurry30", "days_limit": 30}
 res = ig_posts_scraper.get_posts(target_info=target_info)
 display(res)
 ```
@@ -88,42 +88,47 @@ For the complete, real output see
 ```jsonc
 {
   "profile": {
-    "username": "1989ivyshao",
-    "userid": "370962121",
-    "full_name": "邵雨薇IvyShao",
-    "biography": "噓！隱藏版的我 @venusv.magazine ...",
-    "followers": 1015244,
-    "following": 526,
-    "posts_count": 3588,
+    "username": "stephencurry30",
+    "userid": "324599988",
+    "full_name": "Wardell Curry",
+    "biography": "Believer. Husband. Father. Founder. Philanthropist. Olympic Gold Medalist. NYT Best Selling Author. Philippians 4:13.",
+    "followers": 57146739,
+    "following": 1278,
+    "posts_count": 1543,
     "profile_picture": "https://cdn.insta-stories-viewer.com/..."
   },
   "account_status": "public",
-  "updated_at": "2026-06-30T12:16:47.909382+08:00",
+  "updated_at": "2026-06-30 15:03:25.409199+08:00",
   "posts": [
     {
-      "shortcode": "6739181536421845293566",
-      "caption": "生活就是一些小小的習慣堆起來的 ...",
+      "shortcode": "6747441368293816633165",
+      "caption": "Realized dreams from the backyard to the league @sdotcurry #704 #FOE",
       "media_type": "img_multi",
       "is_video": false,
-      "timestamp": 1778063737,
-      "like_count": 9160,
-      "comment_count": 42,
+      "timestamp": 1775509594,
+      "like_count": 461167,
+      "comment_count": 1299,
       "thumbnail": "https://scontent-ord5-1.cdninstagram.com/...",
       "image_url": "https://scontent.cdninstagram.com/..."
     }
     // ... more posts
   ],
   "init_posts": [
-    { "text": "...", "likes": "9,160", "comments": "42", "time": "1 month ago" }
+    {
+      "text": "Played a lil G with my boy @stephencurry30 this week ...",
+      "likes": "76.0k",
+      "comments": "426",
+      "time": "9 days ago"
+    }
     // ... picnob first-page posts, preserved verbatim
   ],
   "top_posts": [
     {
-      "timestamp": 1782697176,
-      "caption": "最近",
-      "comment_count": 32,
-      "like_count": 6522,
-      "shortcode": "DaJtQsTmTPP"
+      "timestamp": 1781966678,
+      "caption": "Played a lil G with my boy @stephencurry30 this week ...",
+      "comment_count": 463,
+      "like_count": 82109,
+      "shortcode": "DZz64IeP1IN"
     }
     // ... profile-scraper highlights, preserved verbatim
   ]
