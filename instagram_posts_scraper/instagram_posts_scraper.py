@@ -6,16 +6,13 @@ from instagram_posts_scraper.utils import *
 from instagram_posts_scraper.scraper import *
 from instagram_posts_scraper.utils.utils import *
 from instagram_posts_scraper.file_operation import *
+from instagram_posts_scraper import schema
+from instagram_posts_scraper.profile_scraper import scrape_profile
 from datetime import datetime
 
 
-class ScrapedDataManager(object):
-    def __init__(self):
-        pass
-
-
 class InstaPeriodScraper(object):
-    def __init__(self) -> None:
+    def __init__(self, use_profile_scraper: bool = True, profile_headless: bool = True) -> None:
         self.pixwox_request = PixwoxRequest()
         self.parser=Parser()
         self.api_parser=ApiParser()
@@ -24,6 +21,13 @@ class InstaPeriodScraper(object):
             parser=self.parser, 
             api_parser=self.api_parser
         )
+        # When enabled, profile metadata (followers / following / posts_count /
+        # biography / full_name / profile picture) is enriched from the
+        # dedicated profile scraper, which is more reliable than picnob HTML.
+        self.use_profile_scraper = use_profile_scraper
+        self.profile_headless = profile_headless
+        self._profile_meta = None
+        self._picnob_profile = None
 
     def check_account_is_public(self, init_html=None):
         if init_html is not None:
@@ -35,21 +39,75 @@ class InstaPeriodScraper(object):
         self.account_status = get_account_status(userid=self.userid, profile_soup=self.profile_soup)
         return self.account_status == "public"
     
-    def get_profile(self):
+    def collect_picnob_profile(self):
+        """Scrape the raw profile values exposed by picnob HTML.
+
+        These act as a fallback for profile metadata when the dedicated
+        profile scraper is unavailable, and ``counts_of_posts`` is also used as
+        a pagination stop-condition during post collection.
+        """
         self.followings = self.parser.get_followings(self.profile_soup)
         self.followers = self.parser.get_followers(self.profile_soup)
         self.counts_of_posts = self.parser.get_counts_of_posts(self.profile_soup)
         try:
             self.introduction = self.parser.get_introduction(self.profile_soup)
-        except:
+        except Exception:
             self.introduction = None
-        
-        self.profile_info = {
+
+        self._picnob_profile = {
+            "userid": self.userid,
             "introduction": self.introduction,
             "counts_of_posts": self.counts_of_posts,
             "followers": self.followers,
             "followings": self.followings,
         }
+        return self._picnob_profile
+
+    def _fetch_profile_meta(self):
+        """Lazily scrape authoritative profile metadata, caching the result.
+
+        Returns ``None`` (and degrades gracefully) when the profile scraper is
+        disabled or fails for any reason.
+        """
+        if not self.use_profile_scraper:
+            return None
+        if self._profile_meta is not None:
+            return self._profile_meta
+        try:
+            self._profile_meta = scrape_profile(
+                username=self.username,
+                headless=self.profile_headless,
+            )
+        except Exception as exc:
+            print(f"Instagram-profile-scraper unavailable, using picnob fallback: {exc}")
+            self._profile_meta = None
+        return self._profile_meta
+
+    def _build_result(self, account_status, picnob_profile=None,
+                      api_posts=None, html_posts=None, init_posts=None, warning=None):
+        """Assemble the consolidated result from both data sources.
+
+        ``init_posts`` (raw picnob first-page HTML posts) and ``top_posts``
+        (raw profile-scraper highlights) are passed through untouched so no
+        source data is dropped.
+        """
+        profile_meta = self._fetch_profile_meta()
+        profile = schema.build_profile(
+            username=self.username,
+            picnob_profile=picnob_profile,
+            profile_meta=profile_meta,
+        )
+        posts = schema.normalize_posts(api_items=api_posts, html_items=html_posts)
+        top_posts = (profile_meta or {}).get("top_posts") or []
+        return schema.build_result(
+            account_status=account_status,
+            profile=profile,
+            updated_at=get_current_time(timezone="Asia/Taipei"),
+            posts=posts,
+            init_posts=init_posts,
+            top_posts=top_posts,
+            warning=warning,
+        )
 
     def get_init_api_data(self):
         init_api_data = self.scraper.get_init_api_data(userid=self.userid)
@@ -58,46 +116,6 @@ class InstaPeriodScraper(object):
     def get_next_api_data(self, next_maxid:str, next_:str,username:str):
         next_api_data = self.scraper.get_next_api_data(userid=self.userid, next_maxid=next_maxid, next_=next_, username=username)
         return next_api_data
-
-    def get_private_account_res(self):
-        res = {
-            "profile":{
-                "userid":self.userid,
-                "username":self.target_info["username"],
-                "followers":self.followers,
-                "followings":self.followings,
-                "counts_of_posts":self.counts_of_posts,
-                "introduction":self.introduction
-                },
-            "account_status":self.account_status,
-            "updated_at": get_current_time(timezone="Asia/Taipei"),
-            "data":[]
-        }
-        return res
-
-    def get_missing_account_res(self):
-        res = {
-            "profile":{
-                "userid":None,
-                "username":self.target_info["username"],
-                "followers":None,
-                "followings":None,
-                "counts_of_posts":None,
-                "introduction":None
-                },
-            "account_status":self.account_status,
-            "updated_at": get_current_time(timezone="Asia/Taipei"),
-            "data":[]
-        }
-        return res
-
-    def get_public_account_res(self, scraped_posts, init_api_data):
-        res = {
-            "profile": self.profile_info,
-            "account_status":self.account_status,
-            "updated_at": get_current_time(timezone="Asia/Taipei"),
-            "data":scraped_posts}
-        return res
 
     # @timeout(300)
     def get_period_data(self, days_limit: int, init_maxid: str, init_api_data: dict, username: str) -> list:
@@ -149,6 +167,9 @@ class InstaPeriodScraper(object):
                         next_=next_metadata['next'],
                         username=username
                     )
+
+                    if not isinstance(next_api_data, dict):
+                        raise ValueError("Invalid next API response")
 
                     # Process API response
                     posts_data = next_api_data.get('posts', {})
@@ -245,27 +266,73 @@ class InstaPeriodScraper(object):
             if not self.check_account_is_public(init_html=init_html):
                 print("This is private account")
                 if self.account_status == "private":
-                    self.get_profile()
-                    res = self.get_private_account_res()
-                    return res
+                    picnob_profile = self.collect_picnob_profile()
+                    return self._build_result(
+                        account_status=self.account_status,
+                        picnob_profile=picnob_profile,
+                    )
                 elif self.account_status == "missing":
-                    res = self.get_missing_account_res()
-                    return res
+                    return self._build_result(account_status=self.account_status)
 
             if self.check_account_is_public(init_html=init_html):
-                self.scraper_utils = get_scraper_utils(html=self.init_response.text) # new
+                self.scraper_utils = get_scraper_utils(html=self.init_response.text)
                 print(f"This is public account")
                 init_response = self.init_response
 
-                # init_api_data = self.get_init_api_data() # 帳號資訊 & 上方頁面內容
-                userid = self.scraper_utils["userid"]
-                username = self.scraper_utils["username"]
-                next_maxid = self.scraper_utils["data_maxid"]
-                next_ = self.scraper_utils["clean_data_next"]
-                next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
-                init_api_data = self.pixwox_request.send_requests(url=next_api) # actually, this is next..
-                init_api_data = init_api_data.json()
-                self.get_profile()
+                # Prefer the paginated endpoint when page metadata is available.
+                # Some public profiles do not expose a.more_btn; in that case,
+                # fallback to the initial API to avoid NoneType errors.
+                if self.scraper_utils is not None:
+                    userid = self.scraper_utils["userid"]
+                    username = self.scraper_utils["username"]
+                    next_maxid = self.scraper_utils["data_maxid"]
+                    next_ = self.scraper_utils["clean_data_next"]
+                    next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
+                    init_api_data = self.pixwox_request.send_requests(url=next_api) # actually, this is next..
+                    init_api_data = init_api_data.json()
+                else:
+                    init_api_data = self.get_init_api_data()
+
+                if (not isinstance(init_api_data, dict) or "posts" not in init_api_data) and driver is None:
+                    # Cached requests session can pass profile checks but still be blocked on API.
+                    # Force a fresh browser-backed session and retry once.
+                    print("Cached session cannot access API. Refreshing via browser")
+                    headers, cookies, init_html, driver = get_valid_headers_cookies(
+                        username=username,
+                        force_refresh=True,
+                    )
+                    self.pixwox_request.set_valid_headers_cookies(valid_headers_cookies=(headers, cookies))
+                    if driver is not None:
+                        self.pixwox_request.set_driver(driver)
+
+                    self.check_account_is_public(init_html=init_html)
+                    self.scraper_utils = get_scraper_utils(html=self.init_response.text)
+                    if self.scraper_utils is not None:
+                        userid = self.scraper_utils["userid"]
+                        username = self.scraper_utils["username"]
+                        next_maxid = self.scraper_utils["data_maxid"]
+                        next_ = self.scraper_utils["clean_data_next"]
+                        next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
+                        init_api_data = self.pixwox_request.send_requests(url=next_api).json()
+                    else:
+                        init_api_data = self.get_init_api_data()
+
+                if not isinstance(init_api_data, dict) or "posts" not in init_api_data:
+                    # Some public accounts can pass profile checks but still
+                    # return non-standard API payloads. Degrade gracefully
+                    # with HTML-visible posts instead of failing hard.
+                    picnob_profile = self.collect_picnob_profile()
+                    init_posts = self.parser.extract_init_posts(init_response.text)
+                    return self._build_result(
+                        account_status=self.account_status,
+                        picnob_profile=picnob_profile,
+                        html_posts=init_posts,
+                        init_posts=init_posts,
+                        warning="api_unavailable_for_account",
+                    )
+
+                picnob_profile = self.collect_picnob_profile()
+                init_posts = self.parser.extract_init_posts(init_response.text)
                 # can scrape next round's posts
                 if init_api_data["posts"]["has_next"] != False:
                     maxid = init_api_data["posts"]["maxid"]
@@ -275,21 +342,20 @@ class InstaPeriodScraper(object):
                         init_api_data=init_api_data,
                         username=username
                         )
-
-                    # return period_posts
-                    res = self.get_public_account_res(
-                        scraped_posts=period_posts, 
-                        init_api_data=init_api_data
-                        )
-                    init_posts = self.parser.extract_init_posts(init_response.text)
-                    res["init_posts"] = init_posts
-                    return res
+                    return self._build_result(
+                        account_status=self.account_status,
+                        picnob_profile=picnob_profile,
+                        api_posts=period_posts,
+                        init_posts=init_posts,
+                    )
                 # # no more posts
                 elif init_api_data["posts"]["has_next"] == False: # (表示該帳號貼文數<=12, 無法繼續往下找)
-                    res = self.get_public_account_res(scraped_posts=init_api_data["posts"]["items"], init_api_data=init_api_data)
-                    init_posts = self.parser.extract_init_posts(init_response.text)
-                    res["init_posts"] = init_posts
-                    return res
+                    return self._build_result(
+                        account_status=self.account_status,
+                        picnob_profile=picnob_profile,
+                        api_posts=init_api_data["posts"]["items"],
+                        init_posts=init_posts,
+                    )
         finally:
             # Always close the Selenium driver when scraping is done or an error occurs.
             if driver is not None:

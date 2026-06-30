@@ -38,13 +38,33 @@ class PixwoxRequest(object):
         """Use a live Selenium driver for all requests (bypasses Cloudflare)."""
         self.__driver = driver
 
+    def __wait_for_body(self, url, timeout=8, poll=0.2):
+        """Poll body.innerText until the response is ready instead of a fixed sleep.
+
+        For JSON API endpoints this returns as soon as the payload starts with
+        '{' or '[' (usually well under 0.5s), replacing the old hard 2s wait per
+        request. Falls back to whatever is present after `timeout` seconds.
+        """
+        is_api = "/api/" in url
+        deadline = time.time() + timeout
+        text = ""
+        while time.time() < deadline:
+            text = self.__driver.execute_script("return document.body.innerText") or ""
+            stripped = text.lstrip()
+            if is_api:
+                if stripped.startswith("{") or stripped.startswith("["):
+                    return text
+            elif stripped:
+                return text
+            time.sleep(poll)
+        return text
+
     def send_requests(self, url):
         if self.__driver is not None:
             self.__driver.get(url)
-            time.sleep(2)
             # For JSON API endpoints Chrome wraps content in <pre>; for HTML pages
             # we want the full source. Use innerText of body to get clean content.
-            text = self.__driver.execute_script("return document.body.innerText")
+            text = self.__wait_for_body(url)
             return _SeleniumResponse(text)
         # Fallback: plain requests (works only when Cloudflare is not blocking)
         response = requests.get(

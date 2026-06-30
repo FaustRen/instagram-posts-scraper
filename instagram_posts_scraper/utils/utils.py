@@ -2,10 +2,12 @@
 import concurrent.futures as futures
 from datetime import datetime
 from functools import wraps
+import os
 from pathlib import Path
 import json
 import time
 
+import cloudscraper
 import pandas as pd
 import pytz
 import requests
@@ -119,12 +121,64 @@ class BrowserSession:
     ]
 
     def __init__(self, username: str):
+        self.username = username
         self.url = f"https://www.picnob.com/profile/{username}"
         self.driver = None
-        self._cache_path = (
-            Path(__file__).resolve().parent.parent / "auth_data" / self._AUTH_FILE
-        )
-        self._cache_path.parent.mkdir(exist_ok=True)
+        self._cache_path = self._build_cache_path(username)
+        self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+        # Persistent Chrome profile: Cloudflare clearance (cf_clearance) lives in
+        # the browser profile, not in the cookie jar. Reusing the same profile
+        # across runs lets later launches skip the Cloudflare challenge entirely,
+        # which is the single biggest speed win for repeated scrapes.
+        self._profile_dir = self._build_profile_dir()
+
+    @staticmethod
+    def _http_get(url: str, headers: dict, cookies: dict, timeout: int = 20):
+        """GET using cloudscraper (browser-like TLS) with a plain-requests fallback.
+
+        Cloudflare binds cf_clearance to the TLS/JA3 fingerprint, so plain
+        requests often returns 403 even with valid cookies. cloudscraper
+        mimics a browser handshake and is far more likely to pass.
+        """
+        try:
+            scraper = cloudscraper.create_scraper(
+                browser={"browser": "chrome", "platform": "darwin", "mobile": False}
+            )
+            return scraper.get(url, headers=headers, cookies=cookies, timeout=timeout)
+        except Exception:
+            return requests.get(url, headers=headers, cookies=cookies, timeout=timeout)
+
+    @staticmethod
+    def _sanitize_username(username: str) -> str:
+        return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in username)
+
+    def _build_cache_path(self, username: str) -> Path:
+        cache_dir = os.getenv("INSTAGRAM_POSTS_SCRAPER_CACHE_DIR")
+        if cache_dir:
+            root = Path(cache_dir)
+        else:
+            root = Path.home() / ".cache" / "instagram_posts_scraper"
+        return root / f"{self._AUTH_FILE[:-5]}_{self._sanitize_username(username)}.json"
+
+    @staticmethod
+    def _build_profile_dir() -> str:
+        """Shared Chrome profile dir (Cloudflare clearance is domain-wide)."""
+        cache_dir = os.getenv("INSTAGRAM_POSTS_SCRAPER_CACHE_DIR")
+        root = Path(cache_dir) if cache_dir else Path.home() / ".cache" / "instagram_posts_scraper"
+        profile_dir = root / "chrome_profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        return str(profile_dir)
+
+    def _cache_api_is_valid(self, headers: dict, cookies: dict, userid: str) -> bool:
+        try:
+            api_url = f"https://www.picnob.com/api/posts?userid={userid}"
+            resp = self._http_get(api_url, headers=headers, cookies=cookies)
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            return isinstance(data, dict) and "posts" in data and isinstance(data["posts"], dict)
+        except Exception:
+            return False
 
     # ── cache ──────────────────────────────────────────────────────────────────
 
@@ -135,10 +189,16 @@ class BrowserSession:
         try:
             data = json.load(self._cache_path.open())
             headers, cookies = data["headers"], data["cookies"]
-            resp = requests.get(self.url, headers=headers, cookies=cookies)
+            resp = self._http_get(self.url, headers=headers, cookies=cookies)
             if resp.status_code == 200 and 'name="userid"' in resp.text:
-                print("Cache is valid")
-                return headers, cookies, resp.text, None
+                soup = BeautifulSoup(resp.text, "html.parser")
+                userid_input = soup.find('input', {'name': 'userid'})
+                userid = getattr(userid_input, "attrs", {}).get("value", "") if userid_input else ""
+                if userid and self._cache_api_is_valid(headers, cookies, userid):
+                    print("Cache is valid")
+                    return headers, cookies, resp.text, None
+                print("Cache profile is valid but API is not. Refreshing via browser")
+                return None
             print(f"Cache invalid (status={resp.status_code}). Refreshing via browser")
         except Exception:
             print("Failed to read cache. Refreshing via browser")
@@ -153,7 +213,12 @@ class BrowserSession:
     def launch(self):
         """Open the profile URL in an undetected Chrome instance."""
         print("Launching browser to bypass Cloudflare")
-        self.driver = Driver(uc=True, headless=True, chromium_arg="--mute-audio")
+        self.driver = Driver(
+            uc=True,
+            headless=True,
+            chromium_arg="--mute-audio",
+            user_data_dir=self._profile_dir,
+        )
         self.driver.uc_open_with_reconnect(self.url)
         try:
             WebDriverWait(self.driver, 20).until(
@@ -162,9 +227,9 @@ class BrowserSession:
             print("Page loaded successfully")
         except Exception as e:
             print(f"Page load timed out: {e}, continuing anyway")
-        time.sleep(3)
+        time.sleep(1.5)
         self._dismiss_ads()
-        time.sleep(3)
+        time.sleep(1)
         return self
 
     def _dismiss_ads(self):
@@ -203,6 +268,11 @@ class BrowserSession:
         return headers, cookies, self.driver.page_source, self.driver
 
 
-def get_valid_headers_cookies(username: str):
+def get_valid_headers_cookies(username: str, force_refresh: bool = False):
+    # Cookie-jar HTTP caching cannot work for picnob: Selenium never captures
+    # cf_clearance, so reusing cookies via requests/cloudscraper always returns
+    # 403. Speed comes instead from the persistent Chrome profile, which keeps
+    # Cloudflare clearance between runs so the browser launch skips the
+    # challenge. We therefore always go through the live browser.
     session = BrowserSession(username)
-    return session.load_cache() or session.launch().get_session()
+    return session.launch().get_session()
