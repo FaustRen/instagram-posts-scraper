@@ -16,10 +16,16 @@ Basic usage::
 Project: https://github.com/FaustRen/instagram-posts-scraper
 """
 
-__version__ = "0.0.8"
+__version__ = "0.1.0"
 __author__ = "FaustRen"
 __license__ = "MIT"
 
 from instagram_posts_scraper.instagram_posts_scraper import InstaPeriodScraper
+from instagram_posts_scraper.profile_scraper import InstagramProfileScraper, scrape_profile
 
-__all__ = ["InstaPeriodScraper", "__version__"]
+__all__ = [
+    "InstaPeriodScraper",
+    "InstagramProfileScraper",
+    "scrape_profile",
+    "__version__",
+]
