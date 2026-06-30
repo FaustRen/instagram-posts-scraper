@@ -150,6 +150,9 @@ class InstaPeriodScraper(object):
                         username=username
                     )
 
+                    if not isinstance(next_api_data, dict):
+                        raise ValueError("Invalid next API response")
+
                     # Process API response
                     posts_data = next_api_data.get('posts', {})
                     new_items = posts_data.get('items', [])
@@ -253,18 +256,59 @@ class InstaPeriodScraper(object):
                     return res
 
             if self.check_account_is_public(init_html=init_html):
-                self.scraper_utils = get_scraper_utils(html=self.init_response.text) # new
+                self.scraper_utils = get_scraper_utils(html=self.init_response.text)
                 print(f"This is public account")
                 init_response = self.init_response
 
-                # init_api_data = self.get_init_api_data() # 帳號資訊 & 上方頁面內容
-                userid = self.scraper_utils["userid"]
-                username = self.scraper_utils["username"]
-                next_maxid = self.scraper_utils["data_maxid"]
-                next_ = self.scraper_utils["clean_data_next"]
-                next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
-                init_api_data = self.pixwox_request.send_requests(url=next_api) # actually, this is next..
-                init_api_data = init_api_data.json()
+                # Prefer the paginated endpoint when page metadata is available.
+                # Some public profiles do not expose a.more_btn; in that case,
+                # fallback to the initial API to avoid NoneType errors.
+                if self.scraper_utils is not None:
+                    userid = self.scraper_utils["userid"]
+                    username = self.scraper_utils["username"]
+                    next_maxid = self.scraper_utils["data_maxid"]
+                    next_ = self.scraper_utils["clean_data_next"]
+                    next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
+                    init_api_data = self.pixwox_request.send_requests(url=next_api) # actually, this is next..
+                    init_api_data = init_api_data.json()
+                else:
+                    init_api_data = self.get_init_api_data()
+
+                if (not isinstance(init_api_data, dict) or "posts" not in init_api_data) and driver is None:
+                    # Cached requests session can pass profile checks but still be blocked on API.
+                    # Force a fresh browser-backed session and retry once.
+                    print("Cached session cannot access API. Refreshing via browser")
+                    headers, cookies, init_html, driver = get_valid_headers_cookies(
+                        username=username,
+                        force_refresh=True,
+                    )
+                    self.pixwox_request.set_valid_headers_cookies(valid_headers_cookies=(headers, cookies))
+                    if driver is not None:
+                        self.pixwox_request.set_driver(driver)
+
+                    self.check_account_is_public(init_html=init_html)
+                    self.scraper_utils = get_scraper_utils(html=self.init_response.text)
+                    if self.scraper_utils is not None:
+                        userid = self.scraper_utils["userid"]
+                        username = self.scraper_utils["username"]
+                        next_maxid = self.scraper_utils["data_maxid"]
+                        next_ = self.scraper_utils["clean_data_next"]
+                        next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
+                        init_api_data = self.pixwox_request.send_requests(url=next_api).json()
+                    else:
+                        init_api_data = self.get_init_api_data()
+
+                if not isinstance(init_api_data, dict) or "posts" not in init_api_data:
+                    # Some public accounts can pass profile checks but still
+                    # return non-standard API payloads. Degrade gracefully
+                    # with HTML-visible posts instead of failing hard.
+                    self.get_profile()
+                    init_posts = self.parser.extract_init_posts(init_response.text)
+                    res = self.get_public_account_res(scraped_posts=[], init_api_data={})
+                    res["init_posts"] = init_posts
+                    res["warning"] = "api_unavailable_for_account"
+                    return res
+
                 self.get_profile()
                 # can scrape next round's posts
                 if init_api_data["posts"]["has_next"] != False:
