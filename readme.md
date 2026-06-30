@@ -63,14 +63,23 @@ You can check the installed version and module documentation:
 ```python
 import instagram_posts_scraper
 
-print(instagram_posts_scraper.__version__)  # e.g. 0.0.8
+print(instagram_posts_scraper.__version__)  # e.g. 0.1.0
 print(instagram_posts_scraper.__doc__)      # module documentation
 ```
 
 ## Sample Output
 
-The scraper returns a dictionary containing the target's `profile`, `account_status`,
-the scraping timestamp (`updated_at`), and a `data` list of posts.
+The scraper returns a single consolidated dictionary containing the target's
+normalized `profile`, the `account_status`, the scraping timestamp
+(`updated_at`), a `posts` list of normalized posts, plus the raw `init_posts`
+(picnob first-page HTML posts) and `top_posts` (profile-scraper highlights)
+collections, which are preserved verbatim so no source data is lost.
+
+Profile metadata is normalized: `followers` comes from the profile scraper's
+precise count, while `following` and the biography fallback come from picnob.
+Each entry in `posts` is normalized to a single, consistent engagement shape
+(`like_count` / `comment_count` as integers). `init_posts` and `top_posts` keep
+their original shapes untouched.
 
 Below is an **abbreviated** example (long media URLs are truncated with `...` for readability).
 For the complete, real output see
@@ -79,36 +88,44 @@ For the complete, real output see
 ```jsonc
 {
   "profile": {
-    "introduction": [
-      "Believer. Husband. Father. Founder. Philanthropist. Olympic Gold Medalist. NYT Best Selling Author. Philippians 4:13."
-    ],
-    "counts_of_posts": "1542",
-    "followers": "57197761",
-    "followings": "1277"
+    "username": "1989ivyshao",
+    "userid": "370962121",
+    "full_name": "邵雨薇IvyShao",
+    "biography": "噓！隱藏版的我 @venusv.magazine ...",
+    "followers": 1015244,
+    "following": 526,
+    "posts_count": 3588,
+    "profile_picture": "https://cdn.insta-stories-viewer.com/..."
   },
   "account_status": "public",
-  "updated_at": "2026-06-10T19:37:53.477096+08:00",
-  "data": [
+  "updated_at": "2026-06-30T12:16:47.909382+08:00",
+  "posts": [
     {
-      "type": "igtv",
-      "sum": "#sponsored I won’t spoil it. You kinda have to see it for yourself 👀",
-      "sum_pure": "#sponsored I won’t spoil it. You kinda have to see it for yourself",
-      "shortcode": "6747491750303413544165",
-      "time": 1774973529,
-      "ftime": "2 months ago",
-      "count_like": 140546,
-      "count_comment": 753,
-      "count_like_pure": "140k",
-      "count_comment_pure": "753",
-      "thum": "https://scontent-iad3-1.cdninstagram.com/...",
-      "pic": "https://scontent-iad3-1.cdninstagram.com/...",
-      "pic_p": "https://sp1.picnob.com/...",
-      "down_pic": "https://scontent.cdninstagram.com/...",
-      "is_video": true,
-      "video": "https://scontent-iad3-1.cdninstagram.com/...",
-      "down_video": "https://scontent.cdninstagram.com/..."
+      "shortcode": "6739181536421845293566",
+      "caption": "生活就是一些小小的習慣堆起來的 ...",
+      "media_type": "img_multi",
+      "is_video": false,
+      "timestamp": 1778063737,
+      "like_count": 9160,
+      "comment_count": 42,
+      "thumbnail": "https://scontent-ord5-1.cdninstagram.com/...",
+      "image_url": "https://scontent.cdninstagram.com/..."
     }
     // ... more posts
+  ],
+  "init_posts": [
+    { "text": "...", "likes": "9,160", "comments": "42", "time": "1 month ago" }
+    // ... picnob first-page posts, preserved verbatim
+  ],
+  "top_posts": [
+    {
+      "timestamp": 1782697176,
+      "caption": "最近",
+      "comment_count": 32,
+      "like_count": 6522,
+      "shortcode": "DaJtQsTmTPP"
+    }
+    // ... profile-scraper highlights, preserved verbatim
   ]
 }
 ```
