@@ -1,3 +1,11 @@
+## 🚀 Sponsored by CoreClaw
+
+Looking for a production-ready Instagram scraping API?
+
+CoreClaw provides APIs and open-source Workers for **Instagram posts, profiles, comments, and more**, helping developers collect structured data at scale.
+
+🎁 **Start free** → [https://coreclaw.com](https://www.coreclaw.com/?utm_source=github&utm_medium=cpc&utm_campaign=ren&utm_term=&utm_id=ren)
+
 # Instagram Posts Scraper
 
 InstagramPostsScraper is a Python library for collect instagram users' data.
