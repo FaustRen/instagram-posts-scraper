@@ -108,7 +108,7 @@ def normalize_html_post(item: Dict[str, Any]) -> Dict[str, Any]:
         "timestamp": None,
         "like_count": to_int(item.get("likes")),
         "comment_count": to_int(item.get("comments")),
-        "thumbnail": None,
+        "thumbnail": item.get("thumbnail"),
         "image_url": None,
     }
 

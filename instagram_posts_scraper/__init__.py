@@ -16,7 +16,7 @@ Basic usage::
 Project: https://github.com/FaustRen/instagram-posts-scraper
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "FaustRen"
 __license__ = "MIT"
 
