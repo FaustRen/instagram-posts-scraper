@@ -54,13 +54,14 @@ class Parser(object):
 
         # Find all post items under .posts > .items > .item
         items = soup.select("div.posts div.items div.item")
+        print(f"Instagram-posts-scraper Found {len(items)} initial Picnob DOM post items")
 
         init_posts = []
 
         for item in items:
             post = {}
             
-            # 1. Post content text
+            # 1. Post content text (img.img under .cover is also the cover image)
             img_tag = item.select_one("img")
             post["text"] = img_tag.get("alt") if img_tag else None
 
@@ -76,8 +77,16 @@ class Parser(object):
             time_span = item.select_one("div.time span.txt")
             post["time"] = time_span.text.strip() if time_span else None
 
+            # 5. Cover/thumbnail image, prefer src, fallback to data-src.
+            # Extracted from the same img_tag/item, so it is guaranteed to
+            # belong to this exact post (no cross-item matching needed).
+            post["thumbnail"] = (img_tag.get("src") or img_tag.get("data-src")) if img_tag else None
+
             init_posts.append(post)
-        
+
+        matched = sum(1 for p in init_posts if p.get("thumbnail"))
+        print(f"Instagram-posts-scraper Matched {matched}/{len(items)} images to init_posts")
+
         return init_posts
 
     def get_soup(self, response):

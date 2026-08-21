@@ -71,7 +71,7 @@ You can check the installed version and module documentation:
 ```python
 import instagram_posts_scraper
 
-print(instagram_posts_scraper.__version__)  # e.g. 0.1.0
+print(instagram_posts_scraper.__version__)  # e.g. 0.2.0
 print(instagram_posts_scraper.__doc__)      # module documentation
 ```
 
@@ -100,22 +100,22 @@ For the complete, real output see
     "userid": "324599988",
     "full_name": "Wardell Curry",
     "biography": "Believer. Husband. Father. Founder. Philanthropist. Olympic Gold Medalist. NYT Best Selling Author. Philippians 4:13.",
-    "followers": 57146739,
-    "following": 1278,
-    "posts_count": 1543,
-    "profile_picture": "https://cdn.insta-stories-viewer.com/..."
+    "followers": 57049215,
+    "following": 1296,
+    "posts_count": 1556,
+    "profile_picture": "https://cdn.iqsaved.com/..."
   },
   "account_status": "public",
-  "updated_at": "2026-06-30 15:03:25.409199+08:00",
+  "updated_at": "2026-08-21 15:28:13.009746+08:00",
   "posts": [
     {
-      "shortcode": "6747441368293816633165",
-      "caption": "Realized dreams from the backyard to the league @sdotcurry #704 #FOE",
-      "media_type": "img_multi",
-      "is_video": false,
-      "timestamp": 1775509594,
-      "like_count": 461167,
-      "comment_count": 1299,
+      "shortcode": "6772442523573164715722",
+      "caption": "Played a lil G with my boy @stephencurry30 this week to kick off Father’s Day weekend! ...",
+      "media_type": "igtv",
+      "is_video": true,
+      "timestamp": 1781966678,
+      "like_count": 98397,
+      "comment_count": 540,
       "thumbnail": "https://scontent-ord5-1.cdninstagram.com/...",
       "image_url": "https://scontent.cdninstagram.com/..."
     }
@@ -123,20 +123,21 @@ For the complete, real output see
   ],
   "init_posts": [
     {
-      "text": "Played a lil G with my boy @stephencurry30 this week ...",
-      "likes": "76.0k",
-      "comments": "426",
-      "time": "9 days ago"
+      "text": "Quality time looks a little different in our family ...",
+      "likes": "101k",
+      "comments": "425",
+      "time": "7 days ago",
+      "thumbnail": "https://sp1.pixnoy.com/..."
     }
-    // ... picnob first-page posts, preserved verbatim
+    // ... picnob first-page posts, preserved verbatim (now includes the cover `thumbnail`)
   ],
   "top_posts": [
     {
-      "timestamp": 1781966678,
-      "caption": "Played a lil G with my boy @stephencurry30 this week ...",
-      "comment_count": 463,
-      "like_count": 82109,
-      "shortcode": "DZz64IeP1IN"
+      "timestamp": 1786636718,
+      "caption": "Quality time looks a little different in our family 😂 ...",
+      "comment_count": 425,
+      "like_count": 100894,
+      "shortcode": "Db_GagbB20Q"
     }
     // ... profile-scraper highlights, preserved verbatim
   ]
