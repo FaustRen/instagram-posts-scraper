@@ -13,7 +13,7 @@ from datetime import datetime
 
 class InstaPeriodScraper(object):
     def __init__(self, use_profile_scraper: bool = True, profile_headless: bool = True,
-                 posts_headless: bool = False) -> None:
+                 posts_headless: bool = True) -> None:
         self.pixwox_request = PixwoxRequest()
         self.parser=Parser()
         self.api_parser=ApiParser()
@@ -27,8 +27,8 @@ class InstaPeriodScraper(object):
         # dedicated profile scraper, which is more reliable than picnob HTML.
         self.use_profile_scraper = use_profile_scraper
         self.profile_headless = profile_headless
-        # Headless Chrome cannot clear Cloudflare's Turnstile challenge, so the
-        # posts browser runs headed by default.
+        # The posts browser stays hidden unless Cloudflare shows a challenge,
+        # which only a visible window can solve.
         self.posts_headless = posts_headless
         self._profile_meta = None
         self._picnob_profile = None

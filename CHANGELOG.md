@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-27
+
+### Changed
+
+- **The posts browser is hidden again by default.** 0.3.0 forced a visible
+  window on every run because headless Chrome cannot solve Cloudflare's
+  Turnstile. That turned out to be over-broad: the challenge is only shown when
+  the Chrome profile has no valid clearance. With a warm profile, headless
+  reaches the profile page normally.
+- `launch()` now starts headless and reopens with a visible window **only** when
+  a challenge actually blocks the page. Solving it refreshes the profile's
+  clearance, so subsequent runs go back to being hidden automatically.
+- `posts_headless` therefore defaults to `True` again. It now means "prefer
+  headless" rather than "never show a window": the fallback still opens one when
+  a challenge must be solved, since that cannot be done headlessly.
+
+### Fixed
+
+- Duplicate empty `## [0.2.0]` heading in this changelog.
+
 ## [0.3.0] - 2026-08-27
 
 This release restores post collection, which was completely broken: every
@@ -61,8 +81,6 @@ account returned empty `posts` and `init_posts` while reporting success.
 
 - Unused `WebDriverWait` / `expected_conditions` imports, left over from the
   replaced page-load wait.
-
-## [0.2.0] - 2026-08-21
 
 ## [0.2.0] - 2026-08-21
 

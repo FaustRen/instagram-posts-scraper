@@ -143,6 +143,8 @@ class BrowserSession:
 
     _AUTH_FILE = "instagram_posts_scraper_headers.json"
     _MAX_CF_ATTEMPTS = 4
+    # How long to let a page settle before deciding a challenge is blocking it.
+    _CF_SETTLE_SECONDS = 8
     _CLOSE_SELECTORS = [
         '.demand-supply__sd-close-button',
         '[aria-label="Close"]',
@@ -157,12 +159,12 @@ class BrowserSession:
         '//button[contains(text(),"Skip")]',
     ]
 
-    def __init__(self, username: str, headless: bool = False):
+    def __init__(self, username: str, headless: bool = True):
         self.username = username
         self.url = f"{BASE_URL}/profile/{username}"
         self.driver = None
-        # Cloudflare's Turnstile cannot be cleared by a headless browser: headless
-        # Chrome is detected and the challenge loops forever. Default to headed.
+        # Headless is fine while the profile still holds Cloudflare clearance;
+        # launch() reopens with a window only when a challenge blocks the page.
         self.headless = headless
         self.challenge_cleared = False
         self._cache_path = self._build_cache_path(username)
@@ -252,31 +254,22 @@ class BrowserSession:
     # ── browser ────────────────────────────────────────────────────────────────
 
     def launch(self):
-        """Open the profile URL and clear Cloudflare using UC CDP mode."""
-        print("Launching browser to bypass Cloudflare")
-        _allow_nested_event_loop()
-        self.driver = Driver(
-            uc=True,
-            headless=self.headless,
-            chromium_arg="--mute-audio",
-            user_data_dir=self._profile_dir,
-        )
-        # CDP mode is the only UC path that still clears the Turnstile challenge;
-        # uc_open_with_reconnect() now stalls on "Just a moment..." forever.
-        self.driver.activate_cdp_mode(self.url)
-        time.sleep(2)
+        """Open the profile URL and clear Cloudflare using UC CDP mode.
 
-        for attempt in range(1, self._MAX_CF_ATTEMPTS + 1):
-            if self._page_is_ready():
-                self.challenge_cleared = True
-                break
-            try:
-                self.driver.uc_gui_click_captcha()
-            except Exception as e:
-                print(f"Cloudflare click attempt {attempt} failed: {type(e).__name__}")
-            time.sleep(3)
-        else:
-            self.challenge_cleared = self._page_is_ready()
+        Runs hidden whenever possible: a warm Chrome profile still holds
+        Cloudflare clearance, so no challenge is shown and headless succeeds.
+        A visible window is only needed to solve a live Turnstile, which
+        headless Chrome cannot do.
+        """
+        _allow_nested_event_loop()
+        self._open(headless=self.headless)
+
+        if not self.challenge_cleared and self.headless:
+            # Solving the challenge also refreshes the profile's clearance, so
+            # later runs go back to being hidden.
+            print("Cloudflare needs an interactive check; reopening with a window")
+            self._close_driver()
+            self._open(headless=False)
 
         if self.challenge_cleared:
             print("Page loaded successfully")
@@ -287,6 +280,48 @@ class BrowserSession:
         self._dismiss_ads()
         time.sleep(1)
         return self
+
+    def _open(self, headless: bool):
+        """Open the profile URL once, solving the challenge when possible."""
+        print(f"Launching browser to bypass Cloudflare (headless={headless})")
+        self.driver = Driver(
+            uc=True,
+            headless=headless,
+            chromium_arg="--mute-audio",
+            user_data_dir=self._profile_dir,
+        )
+        # CDP mode is the only UC path that still clears the Turnstile challenge;
+        # uc_open_with_reconnect() now stalls on "Just a moment..." forever.
+        self.driver.activate_cdp_mode(self.url)
+
+        deadline = time.time() + self._CF_SETTLE_SECONDS
+        while time.time() < deadline:
+            time.sleep(1)
+            if self._page_is_ready():
+                self.challenge_cleared = True
+                return
+
+        if headless:
+            self.challenge_cleared = False
+            return  # clicking needs a real window; caller retries headed
+
+        for attempt in range(1, self._MAX_CF_ATTEMPTS + 1):
+            try:
+                self.driver.uc_gui_click_captcha()
+            except Exception as e:
+                print(f"Cloudflare click attempt {attempt} failed: {type(e).__name__}")
+            time.sleep(3)
+            if self._page_is_ready():
+                self.challenge_cleared = True
+                return
+        self.challenge_cleared = False
+
+    def _close_driver(self):
+        try:
+            self.driver.quit()
+        except Exception:
+            pass
+        self.driver = None
 
     def _page_is_ready(self) -> bool:
         """True once the real profile page (not the challenge) is loaded."""
@@ -357,10 +392,10 @@ class BrowserSession:
 
 
 def get_valid_headers_cookies(username: str, force_refresh: bool = False,
-                              headless: bool = False):
+                              headless: bool = True):
     # Cookie-jar HTTP caching cannot work here: Selenium never captures a usable
     # cf_clearance for reuse, so requests/cloudscraper always return 403. The
-    # live browser is therefore the only viable path, and it must run headed
-    # because headless Chrome cannot clear Cloudflare's Turnstile challenge.
+    # live browser is therefore the only viable path. It stays hidden unless a
+    # Cloudflare challenge appears, which only a real window can solve.
     session = BrowserSession(username, headless=headless)
     return session.launch().get_session()
