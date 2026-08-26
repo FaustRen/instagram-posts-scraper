@@ -5,6 +5,65 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-27
+
+This release restores post collection, which was completely broken: every
+account returned empty `posts` and `init_posts` while reporting success.
+
+### Fixed
+
+- **Empty `posts` and `init_posts` for every account.** Three independent
+  causes had to be fixed together:
+  - *Domain moved again.* `picnob.com` now answers `403` and redirects to
+    `pixnoy.com`. Every URL is now derived from a single `BASE_URL` constant
+    instead of being hard-coded in four places.
+  - *Headless UC mode can no longer clear Cloudflare.* `uc_open_with_reconnect`
+    stalls on the Turnstile interstitial ("Just a moment...") indefinitely, so
+    the profile page was never reached. The browser now uses SeleniumBase CDP
+    mode (`activate_cdp_mode`) with a bounded captcha-click retry loop, and
+    verifies the real page actually loaded instead of assuming it did.
+  - *Failures were silent.* A blocked run and a deleted account both yielded
+    `account_status: "missing"` with empty lists and no error, so the breakage
+    looked like valid data.
+- **Truncated API responses.** `cdp.get_text()` caps body text at ~10k
+  characters, which silently corrupted the posts JSON mid-string. Body text is
+  now read via `cdp.evaluate("document.body.innerText")`, which returns the
+  full payload.
+- **`RuntimeError: Cannot run the event loop while another loop is running`.**
+  CDP mode drives Chrome with `loop.run_until_complete()`, which fails inside
+  Jupyter/IPython because the kernel already owns an event loop. A running loop
+  is now detected and made re-entrant via `nest_asyncio`.
+
+### Added
+
+- `InstaPeriodScraper(posts_headless=...)` to control the posts browser
+  independently of the existing `profile_headless`.
+- `warning: "cloudflare_challenge_unsolved"` in the result when the challenge
+  could not be cleared, so a blocked run is distinguishable from a genuinely
+  missing account.
+- `looks_like_cloudflare_challenge()` helper and a `BASE_URL` constant.
+
+### Changed
+
+- **The posts browser now runs headed by default.** Headless Chrome cannot pass
+  Cloudflare's Turnstile, so `posts_headless` defaults to `False` and a browser
+  window will appear during scraping. Set `posts_headless=True` to override
+  (expect Cloudflare to block it).
+- Requests through the live driver now navigate via CDP, falling back to plain
+  WebDriver when CDP is unavailable.
+- Ad dismissal and session capture degrade gracefully instead of raising: their
+  WebDriver-only APIs (`switch_to`, `find_elements`, `get_cookies`) are not
+  available while the driver is in CDP mode.
+- Bumped `seleniumbase` to `>=4.50.2` (required for `activate_cdp_mode`) and
+  added `nest_asyncio` as a dependency.
+
+### Removed
+
+- Unused `WebDriverWait` / `expected_conditions` imports, left over from the
+  replaced page-load wait.
+
+## [0.2.0] - 2026-08-21
+
 ## [0.2.0] - 2026-08-21
 
 ### Added

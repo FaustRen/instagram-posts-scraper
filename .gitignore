@@ -4,3 +4,8 @@
 build/
 dist/
 *.egg-info/
+
+# SeleniumBase run artifacts
+downloaded_files/
+latest_logs/
+assets/

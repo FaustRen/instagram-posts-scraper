@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import json
 
+from instagram_posts_scraper.utils.utils import BASE_URL
+
 
 class Scraper(object):
     def __init__(self, pixwox_request=None, parser=None,api_parser=None):
@@ -18,15 +20,15 @@ class Scraper(object):
 
     @property
     def init_url(self) -> str:
-        self._init_url = f"https://www.picnob.com/profile/{self.username}"
+        self._init_url = f"{BASE_URL}/profile/{self.username}"
         return self._init_url
     
     def get_init_api(self, userid:str) -> str:
-        self._init_api = f"https://www.picnob.com/api/posts?userid={userid}"
+        self._init_api = f"{BASE_URL}/api/posts?userid={userid}"
         return self._init_api
     
     def get_next_api(self, userid:str, next_maxid:str, next_:str, username:str) -> str:
-        next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}&maxid={next_maxid}"
+        next_api = f"{BASE_URL}/api/posts?username={username}&userid={userid}&next={next_}&maxid={next_maxid}"
         return next_api
     
     def send_api(self,api_url:str):

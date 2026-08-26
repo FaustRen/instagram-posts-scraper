@@ -5,6 +5,8 @@ import cloudscraper
 from bs4 import BeautifulSoup
 import requests
 
+from instagram_posts_scraper.utils.utils import BASE_URL
+
 
 class _SeleniumResponse:
     """Minimal requests.Response-compatible wrapper for Selenium page fetches."""
@@ -38,6 +40,31 @@ class PixwoxRequest(object):
         """Use a live Selenium driver for all requests (bypasses Cloudflare)."""
         self.__driver = driver
 
+    def __navigate(self, url):
+        """Navigate via CDP when active, else via plain WebDriver."""
+        cdp = getattr(self.__driver, "cdp", None)
+        if cdp is not None:
+            try:
+                cdp.get(url)
+                return
+            except Exception:
+                pass
+        self.__driver.get(url)
+
+    def __body_text(self) -> str:
+        """Read body text, preferring CDP evaluate().
+
+        cdp.get_text() truncates payloads at ~10k chars, which silently corrupts
+        the posts JSON, so evaluate() is used instead.
+        """
+        cdp = getattr(self.__driver, "cdp", None)
+        if cdp is not None:
+            try:
+                return cdp.evaluate("document.body.innerText") or ""
+            except Exception:
+                pass
+        return self.__driver.execute_script("return document.body.innerText") or ""
+
     def __wait_for_body(self, url, timeout=8, poll=0.2):
         """Poll body.innerText until the response is ready instead of a fixed sleep.
 
@@ -49,7 +76,7 @@ class PixwoxRequest(object):
         deadline = time.time() + timeout
         text = ""
         while time.time() < deadline:
-            text = self.__driver.execute_script("return document.body.innerText") or ""
+            text = self.__body_text()
             stripped = text.lstrip()
             if is_api:
                 if stripped.startswith("{") or stripped.startswith("["):
@@ -61,7 +88,7 @@ class PixwoxRequest(object):
 
     def send_requests(self, url):
         if self.__driver is not None:
-            self.__driver.get(url)
+            self.__navigate(url)
             # For JSON API endpoints Chrome wraps content in <pre>; for HTML pages
             # we want the full source. Use innerText of body to get clean content.
             text = self.__wait_for_body(url)
@@ -80,7 +107,7 @@ class PixwoxRequest(object):
         self.__cookies = self.__valid_headers_cookies[1]
         
     def get_init_content(self, username: str) -> str:
-        get_url = f"https://www.pixnoy.com/profile/{username}"
+        get_url = f"{BASE_URL}/profile/{username}"
         res = self.send_requests(get_url)
         soup = BeautifulSoup(res.text, self.__DEFAULT_SOUP_PARSER)
         userid_input_element = soup.find(
