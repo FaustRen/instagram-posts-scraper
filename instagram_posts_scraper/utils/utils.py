@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import asyncio
 import concurrent.futures as futures
 from datetime import datetime
 from functools import wraps
@@ -13,9 +14,44 @@ import pytz
 import requests
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
 from seleniumbase import Driver
+
+
+# The service keeps renaming itself (pixwox -> picnob -> pixnoy). picnob.com now
+# answers 403 and redirects here, so every URL is built from this one constant.
+BASE_URL = "https://www.pixnoy.com"
+
+# Markers present in Cloudflare's interstitial ("Just a moment...") page.
+_CF_CHALLENGE_MARKERS = ("cf-chl", "challenge-platform", "turnstile")
+
+
+def looks_like_cloudflare_challenge(html: str) -> bool:
+    """True when `html` is Cloudflare's interstitial rather than real content."""
+    if not html or 'name="userid"' in html:
+        return False
+    low = html.lower()
+    return any(marker in low for marker in _CF_CHALLENGE_MARKERS)
+
+
+def _allow_nested_event_loop():
+    """Let CDP mode run inside Jupyter/IPython.
+
+    CDP mode drives Chrome with ``loop.run_until_complete()``, which raises
+    "Cannot run the event loop while another loop is running" when a notebook
+    kernel already owns a loop. Patching makes the loop re-entrant.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return  # plain script: no running loop, nothing to patch
+    try:
+        import nest_asyncio
+    except ImportError:
+        print("WARNING: detected a running event loop (Jupyter/IPython) but "
+              "nest_asyncio is not installed. Run `pip install nest_asyncio`, "
+              "or run this as a plain Python script instead.")
+        return
+    nest_asyncio.apply()
 
 
 # ── decorators ─────────────────────────────────────────────────────────────────
@@ -106,6 +142,7 @@ class BrowserSession:
     """
 
     _AUTH_FILE = "instagram_posts_scraper_headers.json"
+    _MAX_CF_ATTEMPTS = 4
     _CLOSE_SELECTORS = [
         '.demand-supply__sd-close-button',
         '[aria-label="Close"]',
@@ -120,10 +157,14 @@ class BrowserSession:
         '//button[contains(text(),"Skip")]',
     ]
 
-    def __init__(self, username: str):
+    def __init__(self, username: str, headless: bool = False):
         self.username = username
-        self.url = f"https://www.picnob.com/profile/{username}"
+        self.url = f"{BASE_URL}/profile/{username}"
         self.driver = None
+        # Cloudflare's Turnstile cannot be cleared by a headless browser: headless
+        # Chrome is detected and the challenge loops forever. Default to headed.
+        self.headless = headless
+        self.challenge_cleared = False
         self._cache_path = self._build_cache_path(username)
         self._cache_path.parent.mkdir(parents=True, exist_ok=True)
         # Persistent Chrome profile: Cloudflare clearance (cf_clearance) lives in
@@ -171,7 +212,7 @@ class BrowserSession:
 
     def _cache_api_is_valid(self, headers: dict, cookies: dict, userid: str) -> bool:
         try:
-            api_url = f"https://www.picnob.com/api/posts?userid={userid}"
+            api_url = f"{BASE_URL}/api/posts?userid={userid}"
             resp = self._http_get(api_url, headers=headers, cookies=cookies)
             if resp.status_code != 200:
                 return False
@@ -211,30 +252,67 @@ class BrowserSession:
     # ── browser ────────────────────────────────────────────────────────────────
 
     def launch(self):
-        """Open the profile URL in an undetected Chrome instance."""
+        """Open the profile URL and clear Cloudflare using UC CDP mode."""
         print("Launching browser to bypass Cloudflare")
+        _allow_nested_event_loop()
         self.driver = Driver(
             uc=True,
-            headless=True,
+            headless=self.headless,
             chromium_arg="--mute-audio",
             user_data_dir=self._profile_dir,
         )
-        self.driver.uc_open_with_reconnect(self.url)
-        try:
-            WebDriverWait(self.driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='userid']"))
-            )
+        # CDP mode is the only UC path that still clears the Turnstile challenge;
+        # uc_open_with_reconnect() now stalls on "Just a moment..." forever.
+        self.driver.activate_cdp_mode(self.url)
+        time.sleep(2)
+
+        for attempt in range(1, self._MAX_CF_ATTEMPTS + 1):
+            if self._page_is_ready():
+                self.challenge_cleared = True
+                break
+            try:
+                self.driver.uc_gui_click_captcha()
+            except Exception as e:
+                print(f"Cloudflare click attempt {attempt} failed: {type(e).__name__}")
+            time.sleep(3)
+        else:
+            self.challenge_cleared = self._page_is_ready()
+
+        if self.challenge_cleared:
             print("Page loaded successfully")
-        except Exception as e:
-            print(f"Page load timed out: {e}, continuing anyway")
-        time.sleep(1.5)
+        else:
+            print("WARNING: Cloudflare challenge was not cleared; "
+                  "posts and init_posts will be empty for this run")
+
         self._dismiss_ads()
         time.sleep(1)
         return self
 
+    def _page_is_ready(self) -> bool:
+        """True once the real profile page (not the challenge) is loaded."""
+        try:
+            return 'name="userid"' in self._page_source()
+        except Exception:
+            return False
+
+    def _page_source(self) -> str:
+        """Page source that works in both CDP mode and plain WebDriver mode."""
+        try:
+            return self.driver.get_page_source()
+        except Exception:
+            return self.driver.page_source
+
     def _dismiss_ads(self):
-        """Try to close ads: first inside iframes, then on the main page."""
-        for iframe in self.driver.find_elements(By.TAG_NAME, "iframe"):
+        """Try to close ads: first inside iframes, then on the main page.
+
+        Best-effort only: the iframe/switch_to APIs below are plain-WebDriver
+        calls that are unavailable while the driver runs in CDP mode.
+        """
+        try:
+            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+        except Exception:
+            return
+        for iframe in iframes:
             try:
                 self.driver.switch_to.frame(iframe)
                 for xpath in self._SKIP_XPATHS:
@@ -247,7 +325,10 @@ class BrowserSession:
                         pass
             except Exception:
                 pass
-        self.driver.switch_to.default_content()
+        try:
+            self.driver.switch_to.default_content()
+        except Exception:
+            return
         for sel in self._CLOSE_SELECTORS:
             try:
                 self.driver.execute_script(
@@ -261,18 +342,25 @@ class BrowserSession:
 
     def get_session(self):
         """Persist cookies and return (headers, cookies, page_html, driver)."""
-        headers = {"User-Agent": self.driver.execute_script("return navigator.userAgent;")}
-        cookies = {c["name"]: c["value"] for c in self.driver.get_cookies()}
+        try:
+            user_agent = self.driver.execute_script("return navigator.userAgent;")
+        except Exception:
+            user_agent = self.driver.cdp.evaluate("navigator.userAgent")
+        headers = {"User-Agent": user_agent}
+        try:
+            cookies = {c["name"]: c["value"] for c in self.driver.get_cookies()}
+        except Exception:
+            cookies = {}
         self._save_cache(headers, cookies)
         print("Headers and cookies updated successfully")
-        return headers, cookies, self.driver.page_source, self.driver
+        return headers, cookies, self._page_source(), self.driver
 
 
-def get_valid_headers_cookies(username: str, force_refresh: bool = False):
-    # Cookie-jar HTTP caching cannot work for picnob: Selenium never captures
-    # cf_clearance, so reusing cookies via requests/cloudscraper always returns
-    # 403. Speed comes instead from the persistent Chrome profile, which keeps
-    # Cloudflare clearance between runs so the browser launch skips the
-    # challenge. We therefore always go through the live browser.
-    session = BrowserSession(username)
+def get_valid_headers_cookies(username: str, force_refresh: bool = False,
+                              headless: bool = False):
+    # Cookie-jar HTTP caching cannot work here: Selenium never captures a usable
+    # cf_clearance for reuse, so requests/cloudscraper always return 403. The
+    # live browser is therefore the only viable path, and it must run headed
+    # because headless Chrome cannot clear Cloudflare's Turnstile challenge.
+    session = BrowserSession(username, headless=headless)
     return session.launch().get_session()

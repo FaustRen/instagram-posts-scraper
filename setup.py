@@ -34,11 +34,14 @@ setup(
         "beautifulsoup4>=4.13.4",
         "cloudscraper>=1.2.71",
         "lxml>=6.1.1",
+        # Lets CDP mode run inside Jupyter/IPython, which already owns a loop.
+        "nest_asyncio>=1.6.0",
         "pandas>=2.2.3",
         "pytz>=2024.2",
         "requests>=2.32.3",
         "selenium>=4.33.0",
-        "seleniumbase>=4.39.2",
+        # 4.50+ is required for activate_cdp_mode(), the only working CF bypass.
+        "seleniumbase>=4.50.2",
     ],
     classifiers=[
         "Programming Language :: Python :: 3.11",

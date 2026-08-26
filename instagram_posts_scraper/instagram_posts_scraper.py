@@ -12,7 +12,8 @@ from datetime import datetime
 
 
 class InstaPeriodScraper(object):
-    def __init__(self, use_profile_scraper: bool = True, profile_headless: bool = True) -> None:
+    def __init__(self, use_profile_scraper: bool = True, profile_headless: bool = True,
+                 posts_headless: bool = False) -> None:
         self.pixwox_request = PixwoxRequest()
         self.parser=Parser()
         self.api_parser=ApiParser()
@@ -26,6 +27,9 @@ class InstaPeriodScraper(object):
         # dedicated profile scraper, which is more reliable than picnob HTML.
         self.use_profile_scraper = use_profile_scraper
         self.profile_headless = profile_headless
+        # Headless Chrome cannot clear Cloudflare's Turnstile challenge, so the
+        # posts browser runs headed by default.
+        self.posts_headless = posts_headless
         self._profile_meta = None
         self._picnob_profile = None
 
@@ -255,7 +259,10 @@ class InstaPeriodScraper(object):
 
         # check if user-agent & cookies are valid first
         print("# check if user-agent & cookies are valid first")
-        headers, cookies, init_html, driver = get_valid_headers_cookies(username=username)
+        headers, cookies, init_html, driver = get_valid_headers_cookies(
+            username=username,
+            headless=self.posts_headless,
+        )
         self.pixwox_request.set_valid_headers_cookies(valid_headers_cookies=(headers, cookies))
         # Wire the live Selenium driver so all API requests bypass Cloudflare.
         # driver is None only when the requests-based cache path succeeded.
@@ -272,6 +279,16 @@ class InstaPeriodScraper(object):
                         picnob_profile=picnob_profile,
                     )
                 elif self.account_status == "missing":
+                    # An unsolved Cloudflare challenge looks identical to a
+                    # deleted account (no userid in the HTML), so tell them apart
+                    # instead of silently returning an empty result.
+                    if looks_like_cloudflare_challenge(init_html):
+                        print("Cloudflare challenge was not cleared: "
+                              "cannot tell whether this account exists")
+                        return self._build_result(
+                            account_status=self.account_status,
+                            warning="cloudflare_challenge_unsolved",
+                        )
                     return self._build_result(account_status=self.account_status)
 
             if self.check_account_is_public(init_html=init_html):
@@ -287,7 +304,7 @@ class InstaPeriodScraper(object):
                     username = self.scraper_utils["username"]
                     next_maxid = self.scraper_utils["data_maxid"]
                     next_ = self.scraper_utils["clean_data_next"]
-                    next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
+                    next_api = f"{BASE_URL}/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
                     init_api_data = self.pixwox_request.send_requests(url=next_api) # actually, this is next..
                     init_api_data = init_api_data.json()
                 else:
@@ -300,6 +317,7 @@ class InstaPeriodScraper(object):
                     headers, cookies, init_html, driver = get_valid_headers_cookies(
                         username=username,
                         force_refresh=True,
+                        headless=self.posts_headless,
                     )
                     self.pixwox_request.set_valid_headers_cookies(valid_headers_cookies=(headers, cookies))
                     if driver is not None:
@@ -312,7 +330,7 @@ class InstaPeriodScraper(object):
                         username = self.scraper_utils["username"]
                         next_maxid = self.scraper_utils["data_maxid"]
                         next_ = self.scraper_utils["clean_data_next"]
-                        next_api = f"https://www.picnob.com/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
+                        next_api = f"{BASE_URL}/api/posts?username={username}&userid={userid}&next={next_}==&maxid={next_maxid}"
                         init_api_data = self.pixwox_request.send_requests(url=next_api).json()
                     else:
                         init_api_data = self.get_init_api_data()
